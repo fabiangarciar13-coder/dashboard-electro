@@ -1,0 +1,304 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Dashboard Electro – Live</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=DM+Mono:wght@400;500&display=swap');
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  :root {
+    --bg: #0f1117; --surface: #181c25; --border: #2a3148;
+    --accent: #4f8ef7; --text: #e8ecf5; --muted: #7a86a1;
+    --font: 'Inter', sans-serif; --mono: 'DM Mono', monospace;
+  }
+  body { background: var(--bg); color: var(--text); font-family: var(--font); min-height: 100vh; padding: 2rem; }
+
+  header { display: flex; align-items: flex-start; justify-content: space-between; margin-bottom: 2.5rem; border-bottom: 1px solid var(--border); padding-bottom: 1.5rem; flex-wrap: wrap; gap: 1rem; }
+  .logo-block { display: flex; flex-direction: column; }
+  header .eyebrow { font-family: var(--mono); font-size: 0.7rem; letter-spacing: 0.12em; color: var(--accent); text-transform: uppercase; margin-bottom: 0.25rem; }
+  header h1 { font-size: 1.8rem; font-weight: 700; letter-spacing: -0.03em; line-height: 1; }
+  header .subtitle { font-size: 0.82rem; color: var(--muted); margin-top: 0.3rem; }
+
+  .live-badge { display: flex; align-items: center; gap: 0.5rem; font-family: var(--mono); font-size: 0.7rem; color: #38d9b9; border: 1px solid #38d9b9; padding: 0.4rem 0.9rem; border-radius: 20px; height: fit-content; }
+  .live-dot { width: 7px; height: 7px; border-radius: 50%; background: #38d9b9; animation: pulse 1.8s ease-in-out infinite; }
+  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.3} }
+
+  /* Loading */
+  #loading { display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 40vh; gap: 1rem; }
+  .spinner { width: 36px; height: 36px; border: 3px solid var(--border); border-top-color: var(--accent); border-radius: 50%; animation: spin 0.8s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  #loading p { font-family: var(--mono); font-size: 0.75rem; color: var(--muted); }
+
+  #error-msg { display: none; background: #2a1a1a; border: 1px solid #fc5c7d; border-radius: 12px; padding: 1.5rem; color: #fc5c7d; font-family: var(--mono); font-size: 0.8rem; margin-bottom: 2rem; }
+
+  #dashboard { display: none; }
+
+  .kpi-row { display: grid; grid-template-columns: repeat(5, 1fr); gap: 1rem; margin-bottom: 2rem; }
+  .kpi { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 1.25rem 1.5rem; position: relative; overflow: hidden; }
+  .kpi::before { content: ''; position: absolute; top: 0; left: 0; right: 0; height: 3px; background: var(--kpi-color, var(--accent)); }
+  .kpi .label { font-size: 0.72rem; font-family: var(--mono); letter-spacing: 0.08em; color: var(--muted); text-transform: uppercase; margin-bottom: 0.5rem; }
+  .kpi .value { font-size: 2.1rem; font-weight: 700; letter-spacing: -0.04em; color: var(--kpi-color, var(--text)); }
+  .kpi .sub { font-size: 0.75rem; color: var(--muted); margin-top: 0.25rem; }
+
+  .charts-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1.25rem; margin-bottom: 1.25rem; }
+  .chart-wide { grid-column: 1 / -1; }
+  .card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 1.5rem; }
+  .card h2 { font-size: 0.78rem; font-family: var(--mono); letter-spacing: 0.1em; color: var(--muted); text-transform: uppercase; margin-bottom: 1.25rem; }
+  canvas { display: block; }
+
+  .last-update { font-family: var(--mono); font-size: 0.68rem; color: var(--muted); text-align: right; margin-bottom: 1rem; }
+
+  footer { margin-top: 2.5rem; text-align: center; font-size: 0.7rem; color: var(--muted); font-family: var(--mono); }
+
+  @media (max-width: 900px) { .kpi-row { grid-template-columns: repeat(3, 1fr); } }
+  @media (max-width: 768px) { .kpi-row { grid-template-columns: repeat(2, 1fr); } .charts-grid { grid-template-columns: 1fr; } .chart-wide { grid-column: auto; } }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="logo-block">
+    <span class="eyebrow">Chilquinta · Reporte de Equipos</span>
+    <h1>Dashboard Electro</h1>
+    <p class="subtitle" id="subtitleText">Cargando datos...</p>
+  </div>
+  <div class="live-badge"><span class="live-dot"></span> LIVE · Google Sheets</div>
+</header>
+
+<div id="loading">
+  <div class="spinner"></div>
+  <p>Conectando con Google Sheets...</p>
+</div>
+
+<div id="error-msg">
+  ⚠ No se pudo cargar la planilla. Verifica que esté publicada en la web como CSV.
+</div>
+
+<div id="dashboard">
+  <p class="last-update" id="lastUpdate"></p>
+
+  <div class="kpi-row">
+    <div class="kpi" style="--kpi-color:#4f8ef7"><div class="label">Total Registros</div><div class="value" id="kpiTotal">—</div><div class="sub" id="kpiTotalSub">cargando...</div></div>
+    <div class="kpi" style="--kpi-color:#38d9b9"><div class="label">Vigentes</div><div class="value" id="kpiVigentes">—</div><div class="sub" id="kpiVigentesSub"></div></div>
+    <div class="kpi" style="--kpi-color:#f7b731"><div class="label">Vencidos</div><div class="value" id="kpiVencidos">—</div><div class="sub" id="kpiVencidosSub"></div></div>
+    <div class="kpi" style="--kpi-color:#ff8a4c"><div class="label">Retiros</div><div class="value" id="kpiRetiros">—</div><div class="sub" id="kpiRetirosSub"></div></div>
+    <div class="kpi" style="--kpi-color:#9b6ff7"><div class="label">Clientes Asignados</div><div class="value" id="kpiClientes">—</div><div class="sub" id="kpiClientesSub"></div></div>
+  </div>
+
+  <div class="charts-grid">
+    <div class="card"><h2>Equipos por Zona</h2><canvas id="chartZona" height="240"></canvas></div>
+    <div class="card"><h2>Distribución por Tipo de Equipo</h2><canvas id="chartTipo" height="240"></canvas></div>
+    <div class="card chart-wide"><h2>Actividad por Zona</h2><canvas id="chartActividad" height="200"></canvas></div>
+    <div class="card"><h2>Vigencia por Zona</h2><canvas id="chartVigencia" height="240"></canvas></div>
+    <div class="card"><h2>Estado (Status)</h2><canvas id="chartStatus" height="240"></canvas></div>
+    <div class="card"><h2>Retiros por Zona</h2><canvas id="chartRetiros" height="240"></canvas></div>
+    <div class="card"><h2>Retiros por Tipo de Equipo</h2><canvas id="chartRetirosTipo" height="240"></canvas></div>
+    <div class="card chart-wide"><h2>Clientes Asignados por Producto</h2><canvas id="chartClientes" height="160"></canvas></div>
+  </div>
+</div>
+
+<footer>Datos en vivo desde Google Sheets · Se actualiza al recargar la página · Generado con Claude</footer>
+
+<script>
+const CSV_URL = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vR4l1bZEWI0J_2SILuTf07KCBD_H4Bhsyxj7yfQjHm_qvag23LnYLjiNAOyE3clRQ/pub?output=csv';
+
+const palette = {
+  blue:'#4f8ef7', teal:'#38d9b9', yellow:'#f7b731', pink:'#fc5c7d',
+  purple:'#9b6ff7', orange:'#ff8a4c', green:'#6ce875', slate:'#7a86a1'
+};
+
+const chartDefaults = {
+  plugins: {
+    legend: { labels: { color:'#7a86a1', font:{ family:'DM Mono', size:11 }, boxWidth:14, padding:14 } },
+    tooltip: { backgroundColor:'#1f2535', titleColor:'#e8ecf5', bodyColor:'#7a86a1', borderColor:'#2a3148', borderWidth:1 }
+  },
+  scales: {
+    x: { ticks:{ color:'#7a86a1', font:{ family:'DM Mono', size:10 } }, grid:{ color:'#1f2535' } },
+    y: { ticks:{ color:'#7a86a1', font:{ family:'DM Mono', size:10 } }, grid:{ color:'#2a3148' } }
+  }
+};
+
+// Helpers
+const count = (arr, key, val) => arr.filter(r => r[key] === val).length;
+const countBy = (arr, key) => arr.reduce((acc, r) => { const v = r[key]||'(vacío)'; acc[v]=(acc[v]||0)+1; return acc; }, {});
+const topN = (obj, n) => Object.entries(obj).sort((a,b)=>b[1]-a[1]).slice(0,n);
+const fmt = n => n.toLocaleString('es-CL');
+
+function makeChart(id, type, labels, datasets, extraOpts={}) {
+  return new Chart(document.getElementById(id), {
+    type, data: { labels, datasets },
+    options: { responsive:true, ...extraOpts,
+      plugins: { ...chartDefaults.plugins, ...(extraOpts.plugins||{}) },
+      scales: type==='doughnut' ? undefined : { ...chartDefaults.scales, ...(extraOpts.scales||{}) }
+    }
+  });
+}
+
+// Detect header row: find row where common column names appear
+function findDataRows(rows) {
+  // Look for a row with typical column headers
+  const headerKeywords = ['tipo_equipo','tipoequipo','actividad','zona','estado vigencia','nombre_paciente'];
+  let headerIdx = -1;
+  for (let i = 0; i < Math.min(rows.length, 20); i++) {
+    const rowLower = rows[i].map(c => c.toLowerCase().replace(/\s+/g,''));
+    const matches = headerKeywords.filter(k => rowLower.some(c => c.includes(k.replace(/\s+/g,''))));
+    if (matches.length >= 2) { headerIdx = i; break; }
+  }
+  return headerIdx;
+}
+
+function normalizeRows(rawRows) {
+  const headerIdx = findDataRows(rawRows);
+  if (headerIdx === -1) return [];
+
+  const headers = rawRows[headerIdx].map(h => h.trim().toUpperCase()
+    .replace(/\s+/g,'_').replace(/°/g,'').replace(/N_/g,'N_'));
+  const data = [];
+  for (let i = headerIdx + 1; i < rawRows.length; i++) {
+    const row = rawRows[i];
+    if (row.every(c => !c.trim())) continue; // skip empty rows
+    const obj = {};
+    headers.forEach((h, idx) => { obj[h] = (row[idx]||'').trim(); });
+    // Only include rows that look like real data (have TIPO_EQUIPO or ZONA)
+    if (obj['TIPO_EQUIPO'] || obj['ZONA']) data.push(obj);
+  }
+  return data;
+}
+
+async function loadAndRender() {
+  try {
+    const resp = await fetch(CSV_URL);
+    if (!resp.ok) throw new Error('HTTP ' + resp.status);
+    const text = await resp.text();
+
+    const parsed = Papa.parse(text, { skipEmptyLines: false });
+    const allRows = parsed.data;
+
+    // Process potentially multiple sections
+    const data = normalizeRows(allRows);
+
+    if (data.length === 0) throw new Error('No se encontraron datos con las columnas esperadas');
+
+    // --- KPIs ---
+    const total = data.length;
+    const vigentes = count(data, 'ESTADO_VIGENCIA', 'VIGENTE') + count(data, 'ESTADO_VIGENCIA', 'V');
+    const vencidos = count(data, 'ESTADO_VIGENCIA', 'VENCIDO');
+    const retiros = data.filter(r => (r['ACTIVIDAD']||'').toUpperCase().includes('RETIRO')).length;
+    const clientes = data.filter(r => {
+      const n = r['NOMBRE_PACIENTE'] || r['NOMBRE'] || '';
+      return n.trim() && n.trim() !== ' ';
+    }).length;
+
+    document.getElementById('kpiTotal').textContent = fmt(total);
+    document.getElementById('kpiTotalSub').textContent = `${data.length} registros cargados`;
+    document.getElementById('kpiVigentes').textContent = fmt(vigentes);
+    document.getElementById('kpiVigentesSub').textContent = `${((vigentes/total)*100).toFixed(1)}% del total`;
+    document.getElementById('kpiVencidos').textContent = fmt(vencidos);
+    document.getElementById('kpiVencidosSub').textContent = `${((vencidos/total)*100).toFixed(1)}% del total`;
+    document.getElementById('kpiRetiros').textContent = fmt(retiros);
+    document.getElementById('kpiRetirosSub').textContent = `${((retiros/total)*100).toFixed(1)}% del total`;
+    document.getElementById('kpiClientes').textContent = fmt(clientes);
+    document.getElementById('kpiClientesSub').textContent = `${((clientes/total)*100).toFixed(1)}% con nombre`;
+
+    // --- Zona ---
+    const zonaObj = countBy(data, 'ZONA');
+    const zonaTop = topN(zonaObj, 8);
+    const zonaLabels = zonaTop.map(e=>e[0]);
+    const zonaVals = zonaTop.map(e=>e[1]);
+    const colors8 = [palette.blue,palette.teal,palette.yellow,palette.pink,palette.purple,palette.orange,palette.green,palette.slate];
+
+    makeChart('chartZona','bar', zonaLabels,
+      [{ label:'Equipos', data:zonaVals, backgroundColor:colors8.slice(0,zonaLabels.length), borderRadius:6, borderSkipped:false }],
+      { indexAxis:'y', plugins:{ ...chartDefaults.plugins, legend:{display:false} },
+        scales:{ x:{...chartDefaults.scales.x, grid:{color:'#2a3148'}}, y:{...chartDefaults.scales.y, grid:{display:false}} } }
+    );
+
+    // --- Tipo Equipo ---
+    const tipoObj = countBy(data, 'TIPO_EQUIPO');
+    const tipoTop = topN(tipoObj, 6);
+    makeChart('chartTipo','doughnut', tipoTop.map(e=>e[0]),
+      [{ data:tipoTop.map(e=>e[1]), backgroundColor:colors8.slice(0,tipoTop.length), borderWidth:0, hoverOffset:6 }],
+      { cutout:'65%', plugins:{ ...chartDefaults.plugins, legend:{...chartDefaults.plugins.legend, position:'right'} } }
+    );
+
+    // --- Actividad por Zona ---
+    const actTypes = ['INSPECCIÓN','ENTREGA','RETIRO','CLIENTE NO UBICADO'];
+    const actColors = [palette.blue, palette.teal, palette.orange, palette.pink];
+    const actDatasets = actTypes.map((act, i) => ({
+      label: act,
+      data: zonaLabels.map(z => data.filter(r=>r['ZONA']===z && (r['ACTIVIDAD']||'').toUpperCase()===act).length),
+      backgroundColor: actColors[i]
+    }));
+    makeChart('chartActividad','bar', zonaLabels, actDatasets,
+      { scales:{
+          x:{...chartDefaults.scales.x, stacked:true, grid:{display:false}},
+          y:{...chartDefaults.scales.y, stacked:true}
+        }
+      }
+    );
+
+    // --- Vigencia por Zona ---
+    makeChart('chartVigencia','bar', zonaLabels, [
+      { label:'Vigente', data:zonaLabels.map(z=>data.filter(r=>r['ZONA']===z&&['VIGENTE','V'].includes(r['ESTADO_VIGENCIA'])).length), backgroundColor:palette.teal, borderRadius:4 },
+      { label:'Vencido', data:zonaLabels.map(z=>data.filter(r=>r['ZONA']===z&&r['ESTADO_VIGENCIA']==='VENCIDO').length), backgroundColor:palette.pink, borderRadius:4 },
+    ],{ scales:{x:{...chartDefaults.scales.x, grid:{display:false}}, y:chartDefaults.scales.y} });
+
+    // --- Status ---
+    const statusKey = Object.keys(data[0]).find(k=>k.includes('STATUS')||k.includes('STATU')) || 'STATUS';
+    const statusObj = countBy(data, statusKey);
+    const statusTop = topN(statusObj, 6).filter(e=>e[0]!=='(vacío)');
+    makeChart('chartStatus','doughnut', statusTop.map(e=>e[0]),
+      [{ data:statusTop.map(e=>e[1]), backgroundColor:colors8.slice(0,statusTop.length), borderWidth:0, hoverOffset:6 }],
+      { cutout:'65%', plugins:{ ...chartDefaults.plugins, legend:{...chartDefaults.plugins.legend, position:'right'} } }
+    );
+
+    // --- Retiros por Zona ---
+    const retData = data.filter(r=>(r['ACTIVIDAD']||'').toUpperCase().includes('RETIRO'));
+    const retZona = countBy(retData, 'ZONA');
+    const retZonaTop = topN(retZona, 8);
+    makeChart('chartRetiros','bar', retZonaTop.map(e=>e[0]),
+      [{ label:'Retiros', data:retZonaTop.map(e=>e[1]), backgroundColor:colors8.slice(0,retZonaTop.length), borderRadius:6, borderSkipped:false }],
+      { indexAxis:'y', plugins:{...chartDefaults.plugins, legend:{display:false}},
+        scales:{x:{...chartDefaults.scales.x, grid:{color:'#2a3148'}}, y:{...chartDefaults.scales.y, grid:{display:false}}} }
+    );
+
+    // --- Retiros por Tipo ---
+    const retTipo = countBy(retData, 'TIPO_EQUIPO');
+    const retTipoTop = topN(retTipo, 6).filter(e=>e[0]!=='(vacío)');
+    makeChart('chartRetirosTipo','bar', retTipoTop.map(e=>e[0]),
+      [{ label:'Retiros', data:retTipoTop.map(e=>e[1]), backgroundColor:palette.orange, borderRadius:6, borderSkipped:false }],
+      { plugins:{...chartDefaults.plugins, legend:{display:false}},
+        scales:{x:{...chartDefaults.scales.x, grid:{display:false}}, y:chartDefaults.scales.y} }
+    );
+
+    // --- Clientes por Producto ---
+    const cliData = data.filter(r=>{ const n=r['NOMBRE_PACIENTE']||r['NOMBRE']||''; return n.trim()&&n.trim()!==' '; });
+    const cliTipo = countBy(cliData, 'TIPO_EQUIPO');
+    const cliTop = topN(cliTipo, 8).filter(e=>e[0]!=='(vacío)');
+    makeChart('chartClientes','bar', cliTop.map(e=>e[0]),
+      [{ label:'Clientes', data:cliTop.map(e=>e[1]), backgroundColor:colors8.slice(0,cliTop.length), borderRadius:6, borderSkipped:false }],
+      { indexAxis:'y', plugins:{...chartDefaults.plugins, legend:{display:false}},
+        scales:{x:{...chartDefaults.scales.x, grid:{color:'#2a3148'}}, y:{...chartDefaults.scales.y, grid:{display:false}}} }
+    );
+
+    // Show dashboard
+    document.getElementById('subtitleText').textContent = `${fmt(total)} registros · Datos en vivo`;
+    document.getElementById('lastUpdate').textContent = `Última actualización: ${new Date().toLocaleString('es-CL')}`;
+    document.getElementById('loading').style.display = 'none';
+    document.getElementById('dashboard').style.display = 'block';
+
+  } catch(err) {
+    console.error(err);
+    document.getElementById('loading').style.display = 'none';
+    document.getElementById('error-msg').style.display = 'block';
+    document.getElementById('error-msg').textContent = '⚠ Error al cargar los datos: ' + err.message + '. Verifica que la planilla esté publicada en la web como CSV.';
+  }
+}
+
+loadAndRender();
+</script>
+</body>
+</html>
